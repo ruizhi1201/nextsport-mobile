@@ -18,7 +18,7 @@ import { COLORS } from '../theme';
 type Mode = 'login' | 'signup';
 
 export default function AuthScreen() {
-  const { signInWithEmail, signUpWithEmail, signInWithGoogle } = useAuth();
+  const { signInWithEmail, signUpWithEmail } = useAuth();
   const [mode, setMode] = useState<Mode>('login');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -58,12 +58,7 @@ export default function AuthScreen() {
       setLoading(false);
     }
   }
-
-  async function handleGoogle() {
-    setLoading(true);
-    try {
-      await signInWithGoogle();
-    } catch (err: any) {
+catch (err: any) {
       Alert.alert('Google Sign-In Failed', err.message ?? 'Please try again.');
     } finally {
       setLoading(false);
@@ -167,22 +162,7 @@ export default function AuthScreen() {
             </TouchableOpacity>
 
             {/* Divider */}
-            <View style={styles.divider}>
-              <View style={styles.dividerLine} />
-              <Text style={styles.dividerText}>or</Text>
-              <View style={styles.dividerLine} />
-            </View>
-
-            {/* Google */}
-            <TouchableOpacity
-              style={[styles.googleButton, loading && styles.buttonDisabled]}
-              onPress={handleGoogle}
-              disabled={loading}
-              activeOpacity={0.8}
-            >
-              <Ionicons name="logo-google" size={20} color={COLORS.text} style={{ marginRight: 10 }} />
-              <Text style={styles.googleButtonText}>Continue with Google</Text>
-            </TouchableOpacity>
+            
           </View>
 
           {/* Toggle mode */}
