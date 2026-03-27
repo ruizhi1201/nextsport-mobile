@@ -1,0 +1,35 @@
+{
+  "expo": {
+    "name": "NextSport",
+    "slug": "nextsport",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "dark",
+    "splash": {
+      "image": "./assets/splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#0a0f1e"
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#0a0f1e"
+      },
+      "package": "com.nextsport.app"
+    },
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.nextsport.app"
+    },
+    "plugins": [
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Allow NextSport to access your camera to record swing videos."
+        }
+      ],
+      "expo-av"
+    ]
+  }
+}

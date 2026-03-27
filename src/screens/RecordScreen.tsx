@@ -1,0 +1,595 @@
+import React, { useState, useRef, useCallback } from 'react';
+import {
+  View,
+  Text,
+  StyleSheet,
+  TouchableOpacity,
+  Alert,
+  Platform,
+} from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { Ionicons } from '@expo/vector-icons';
+import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
+import type { StackNavigationProp } from '@react-navigation/stack';
+import { CameraView, useCameraPermissions } from 'expo-camera';
+import type { CameraType } from 'expo-camera/build/Camera.types';
+import * as ImagePicker from 'expo-image-picker';
+import { Video, ResizeMode } from 'expo-av';
+import { submitAnalysis } from '../lib/api';
+import LoadingOverlay from '../components/LoadingOverlay';
+import { COLORS } from '../theme';
+import type { RootStackParamList } from '../navigation/AppNavigator';
+
+type RecordNavProp = StackNavigationProp<RootStackParamList, 'Record'>;
+type RecordRouteProp = RouteProp<RootStackParamList, 'Record'>;
+
+const TOKEN_COST = 10;
+
+export default function RecordScreen() {
+  const navigation = useNavigation<RecordNavProp>();
+  const route = useRoute<RecordRouteProp>();
+  const initialMode = route.params?.mode ?? 'record';
+
+  const [permission, requestPermission] = useCameraPermissions();
+  const [mode, setMode] = useState<'record' | 'upload'>(initialMode);
+  const [cameraFacing, setCameraFacing] = useState<CameraType>('back');
+  const [isRecording, setIsRecording] = useState(false);
+  const [videoUri, setVideoUri] = useState<string | null>(null);
+  const [videoMime, setVideoMime] = useState<string>('video/mp4');
+  const [uploading, setUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0);
+  const cameraRef = useRef<any>(null);
+
+  const requestCameraPermission = useCallback(async () => {
+    const result = await requestPermission();
+    if (!result.granted) {
+      Alert.alert(
+        'Camera Permission Required',
+        'Please allow camera access in Settings to record your swing.',
+        [{ text: 'OK' }]
+      );
+    }
+  }, [requestPermission]);
+
+  async function startRecording() {
+    if (!cameraRef.current) return;
+    setIsRecording(true);
+    try {
+      const video = await cameraRef.current.recordAsync({ maxDuration: 30 });
+      setVideoUri(video.uri);
+    } catch (err: any) {
+      Alert.alert('Recording Error', err.message ?? 'Failed to record video.');
+    } finally {
+      setIsRecording(false);
+    }
+  }
+
+  function stopRecording() {
+    if (cameraRef.current && isRecording) {
+      cameraRef.current.stopRecording();
+    }
+  }
+
+  async function pickVideo() {
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Videos,
+      allowsEditing: false,
+      quality: 1,
+    });
+
+    if (!result.canceled && result.assets[0]) {
+      const asset = result.assets[0];
+      setVideoUri(asset.uri);
+      setVideoMime(asset.mimeType ?? 'video/mp4');
+    }
+  }
+
+  async function handleAnalyze() {
+    if (!videoUri) return;
+    setUploading(true);
+    setUploadProgress(0);
+    try {
+      const result = await submitAnalysis(videoUri, videoMime, (progress) => {
+        setUploadProgress(progress);
+      });
+      navigation.replace('AnalysisResult', { analysisId: result.id, poll: true });
+    } catch (err: any) {
+      Alert.alert(
+        'Upload Failed',
+        err?.response?.data?.error ?? err.message ?? 'Failed to submit video. Please try again.'
+      );
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  function resetVideo() {
+    setVideoUri(null);
+    setUploadProgress(0);
+  }
+
+  // --- Video preview state ---
+  if (videoUri) {
+    return (
+      <SafeAreaView style={styles.safe}>
+        <LoadingOverlay
+          visible={uploading}
+          message={`Uploading…\n${Math.round(uploadProgress * 100)}%\n\nThis may take a moment.`}
+        />
+        <View style={styles.previewHeader}>
+          <TouchableOpacity onPress={resetVideo} style={styles.backButton}>
+            <Ionicons name="arrow-back" size={24} color={COLORS.text} />
+          </TouchableOpacity>
+          <Text style={styles.headerTitle}>Preview</Text>
+          <View style={{ width: 44 }} />
+        </View>
+
+        <View style={styles.videoPreviewContainer}>
+          <Video
+            source={{ uri: videoUri }}
+            style={styles.videoPreview}
+            useNativeControls
+            resizeMode={ResizeMode.CONTAIN}
+            isLooping
+          />
+        </View>
+
+        <View style={styles.previewFooter}>
+          <View style={styles.tokenRow}>
+            <Ionicons name="flash" size={16} color={COLORS.accent} />
+            <Text style={styles.tokenText}>This analysis costs {TOKEN_COST} tokens</Text>
+          </View>
+          <TouchableOpacity
+            style={[styles.analyzeButton, uploading && styles.buttonDisabled]}
+            onPress={handleAnalyze}
+            disabled={uploading}
+            activeOpacity={0.85}
+          >
+            <Ionicons name="analytics" size={22} color="#000" style={{ marginRight: 10 }} />
+            <Text style={styles.analyzeButtonText}>Analyze My Swing</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.retakeButton} onPress={resetVideo}>
+            <Text style={styles.retakeButtonText}>
+              {mode === 'upload' ? 'Choose Different Video' : 'Retake'}
+            </Text>
+          </TouchableOpacity>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  // --- Upload mode ---
+  if (mode === 'upload') {
+    return (
+      <SafeAreaView style={styles.safe}>
+        <View style={styles.previewHeader}>
+          <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
+            <Ionicons name="arrow-back" size={24} color={COLORS.text} />
+          </TouchableOpacity>
+          <Text style={styles.headerTitle}>Upload Video</Text>
+          <TouchableOpacity onPress={() => setMode('record')} style={styles.modeToggle}>
+            <Text style={styles.modeToggleText}>Camera</Text>
+          </TouchableOpacity>
+        </View>
+
+        <View style={styles.uploadContainer}>
+          <TouchableOpacity style={styles.uploadPickerButton} onPress={pickVideo} activeOpacity={0.8}>
+            <Ionicons name="cloud-upload" size={56} color={COLORS.accent} />
+            <Text style={styles.uploadTitle}>Select a Video</Text>
+            <Text style={styles.uploadSubtitle}>MP4, MOV, or AVI · Max 200 MB</Text>
+          </TouchableOpacity>
+
+          <View style={styles.tokenRow}>
+            <Ionicons name="flash" size={16} color={COLORS.accent} />
+            <Text style={styles.tokenText}>This analysis costs {TOKEN_COST} tokens</Text>
+          </View>
+
+          <View style={styles.tipsCard}>
+            <Text style={styles.tipsTitle}>Tips for best results</Text>
+            {[
+              'Film from the side or slightly behind',
+              'Ensure good lighting',
+              'Capture the full swing motion',
+              '5–30 seconds is ideal',
+            ].map((tip, i) => (
+              <View key={i} style={styles.tipRow}>
+                <Ionicons name="checkmark-circle" size={14} color={COLORS.accent} />
+                <Text style={styles.tipText}>{tip}</Text>
+              </View>
+            ))}
+          </View>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  // --- Camera mode ---
+  if (!permission) {
+    return (
+      <SafeAreaView style={styles.safe}>
+        <View style={styles.centeredContent}>
+          <Text style={styles.permissionText}>Checking camera permissions…</Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  if (!permission.granted) {
+    return (
+      <SafeAreaView style={styles.safe}>
+        <View style={styles.centeredContent}>
+          <Ionicons name="camera-outline" size={60} color={COLORS.muted} />
+          <Text style={styles.permissionTitle}>Camera Access Needed</Text>
+          <Text style={styles.permissionSubtitle}>
+            NextSport needs camera access to record your swing videos.
+          </Text>
+          <TouchableOpacity style={styles.permissionButton} onPress={requestCameraPermission}>
+            <Text style={styles.permissionButtonText}>Grant Permission</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.switchToUploadButton}
+            onPress={() => setMode('upload')}
+          >
+            <Text style={styles.switchToUploadText}>Upload a video instead</Text>
+          </TouchableOpacity>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  return (
+    <View style={styles.cameraContainer}>
+      <CameraView
+        ref={cameraRef}
+        style={styles.camera}
+        facing={cameraFacing}
+        mode="video"
+      >
+        {/* Top controls */}
+        <SafeAreaView style={styles.cameraTopBar} edges={['top']}>
+          <TouchableOpacity onPress={() => navigation.goBack()} style={styles.cameraBackButton}>
+            <Ionicons name="close" size={28} color="#fff" />
+          </TouchableOpacity>
+          <View style={styles.cameraTopRight}>
+            {isRecording && (
+              <View style={styles.recordingBadge}>
+                <View style={styles.recordingDot} />
+                <Text style={styles.recordingText}>REC</Text>
+              </View>
+            )}
+            <TouchableOpacity
+              onPress={() => setMode('upload')}
+              style={styles.cameraTopButton}
+            >
+              <Ionicons name="folder-open-outline" size={24} color="#fff" />
+            </TouchableOpacity>
+          </View>
+        </SafeAreaView>
+
+        {/* Bottom controls */}
+        <View style={styles.cameraBottomBar}>
+          <TouchableOpacity
+            onPress={() => setCameraFacing((f) => (f === 'back' ? 'front' : 'back'))}
+            style={styles.flipButton}
+          >
+            <Ionicons name="camera-reverse-outline" size={28} color="#fff" />
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[styles.shutterButton, isRecording && styles.shutterRecording]}
+            onPress={isRecording ? stopRecording : startRecording}
+            activeOpacity={0.8}
+          >
+            <View style={[styles.shutterInner, isRecording && styles.shutterInnerRecording]} />
+          </TouchableOpacity>
+
+          <View style={{ width: 60 }} />
+        </View>
+
+        {/* Hint */}
+        {!isRecording && (
+          <View style={styles.hintContainer}>
+            <Text style={styles.hintText}>Tap the button to start recording</Text>
+            <Text style={styles.hintSubText}>Max 30 seconds · {TOKEN_COST} tokens</Text>
+          </View>
+        )}
+      </CameraView>
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  safe: {
+    flex: 1,
+    backgroundColor: COLORS.background,
+  },
+  previewHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.border,
+  },
+  backButton: {
+    padding: 8,
+    width: 44,
+  },
+  headerTitle: {
+    color: COLORS.text,
+    fontSize: 17,
+    fontWeight: '700',
+  },
+  modeToggle: {
+    padding: 8,
+  },
+  modeToggleText: {
+    color: COLORS.accent,
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  // Video preview
+  videoPreviewContainer: {
+    flex: 1,
+    backgroundColor: '#000',
+  },
+  videoPreview: {
+    flex: 1,
+  },
+  previewFooter: {
+    backgroundColor: COLORS.background,
+    padding: 20,
+    borderTopWidth: 1,
+    borderTopColor: COLORS.border,
+  },
+  tokenRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 14,
+  },
+  tokenText: {
+    color: COLORS.muted,
+    fontSize: 13,
+    marginLeft: 6,
+  },
+  analyzeButton: {
+    backgroundColor: COLORS.accent,
+    borderRadius: 14,
+    paddingVertical: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 10,
+  },
+  analyzeButtonText: {
+    color: '#000',
+    fontSize: 17,
+    fontWeight: '800',
+  },
+  buttonDisabled: {
+    opacity: 0.5,
+  },
+  retakeButton: {
+    alignItems: 'center',
+    paddingVertical: 10,
+  },
+  retakeButtonText: {
+    color: COLORS.muted,
+    fontSize: 15,
+  },
+  // Upload
+  uploadContainer: {
+    flex: 1,
+    paddingHorizontal: 24,
+    paddingTop: 40,
+  },
+  uploadPickerButton: {
+    backgroundColor: COLORS.card,
+    borderRadius: 20,
+    padding: 40,
+    alignItems: 'center',
+    borderWidth: 2,
+    borderColor: 'rgba(34,197,94,0.3)',
+    borderStyle: 'dashed',
+    marginBottom: 20,
+  },
+  uploadTitle: {
+    color: COLORS.text,
+    fontSize: 20,
+    fontWeight: '700',
+    marginTop: 16,
+  },
+  uploadSubtitle: {
+    color: COLORS.muted,
+    fontSize: 13,
+    marginTop: 6,
+  },
+  tipsCard: {
+    backgroundColor: COLORS.card,
+    borderRadius: 14,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    marginTop: 8,
+  },
+  tipsTitle: {
+    color: COLORS.text,
+    fontSize: 14,
+    fontWeight: '700',
+    marginBottom: 10,
+  },
+  tipRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 7,
+  },
+  tipText: {
+    color: COLORS.muted,
+    fontSize: 13,
+    marginLeft: 8,
+  },
+  // Permission
+  centeredContent: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 32,
+  },
+  permissionTitle: {
+    color: COLORS.text,
+    fontSize: 20,
+    fontWeight: '700',
+    marginTop: 16,
+    textAlign: 'center',
+  },
+  permissionSubtitle: {
+    color: COLORS.muted,
+    fontSize: 14,
+    marginTop: 8,
+    textAlign: 'center',
+    lineHeight: 20,
+  },
+  permissionText: {
+    color: COLORS.muted,
+    fontSize: 14,
+  },
+  permissionButton: {
+    backgroundColor: COLORS.accent,
+    borderRadius: 12,
+    paddingVertical: 14,
+    paddingHorizontal: 32,
+    marginTop: 24,
+  },
+  permissionButtonText: {
+    color: '#000',
+    fontSize: 16,
+    fontWeight: '700',
+  },
+  switchToUploadButton: {
+    marginTop: 16,
+    padding: 8,
+  },
+  switchToUploadText: {
+    color: COLORS.accent,
+    fontSize: 14,
+  },
+  // Camera
+  cameraContainer: {
+    flex: 1,
+    backgroundColor: '#000',
+  },
+  camera: {
+    flex: 1,
+  },
+  cameraTopBar: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+  },
+  cameraBackButton: {
+    width: 44,
+    height: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(0,0,0,0.4)',
+    borderRadius: 22,
+  },
+  cameraTopRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  recordingBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(239,68,68,0.8)',
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    marginRight: 8,
+  },
+  recordingDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#fff',
+    marginRight: 5,
+  },
+  recordingText: {
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  cameraTopButton: {
+    width: 44,
+    height: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(0,0,0,0.4)',
+    borderRadius: 22,
+  },
+  cameraBottomBar: {
+    position: 'absolute',
+    bottom: 40,
+    left: 0,
+    right: 0,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 32,
+  },
+  flipButton: {
+    width: 60,
+    height: 60,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    borderRadius: 30,
+    marginRight: 32,
+  },
+  shutterButton: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    borderWidth: 4,
+    borderColor: '#fff',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  shutterRecording: {
+    borderColor: '#ef4444',
+  },
+  shutterInner: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: '#fff',
+  },
+  shutterInnerRecording: {
+    width: 28,
+    height: 28,
+    borderRadius: 6,
+    backgroundColor: '#ef4444',
+  },
+  hintContainer: {
+    position: 'absolute',
+    bottom: 130,
+    left: 0,
+    right: 0,
+    alignItems: 'center',
+  },
+  hintText: {
+    color: 'rgba(255,255,255,0.8)',
+    fontSize: 14,
+    fontWeight: '500',
+  },
+  hintSubText: {
+    color: 'rgba(255,255,255,0.5)',
+    fontSize: 12,
+    marginTop: 4,
+  },
+});
