@@ -61,7 +61,8 @@ export async function getReferral(): Promise<{ referral_code: string; referred_c
 export async function submitAnalysis(
   videoUri: string,
   videoMimeType: string = 'video/mp4',
-  onProgress?: (progress: number) => void
+  onProgress?: (progress: number) => void,
+  durationSeconds?: number
 ): Promise<{ id: string }> {
   const headers = await getAuthHeaders();
 
@@ -72,15 +73,19 @@ export async function submitAnalysis(
     name: 'swing.mp4',
   } as any);
 
+  // Always send duration so server can calculate token cost correctly
+  formData.append('duration', String(durationSeconds ?? 15));
+
   const response = await axios.post(`${BASE_URL}/api/analyze`, formData, {
     headers: {
       ...headers,
       'Content-Type': 'multipart/form-data',
     },
+    timeout: 120000, // 2 min timeout for AI processing
     onUploadProgress: (progressEvent) => {
       if (onProgress && progressEvent.total) {
         const progress = progressEvent.loaded / progressEvent.total;
-        onProgress(progress);
+        onProgress(Math.min(progress, 0.95));
       }
     },
   });
