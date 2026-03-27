@@ -1,4 +1,5 @@
 import React from 'react';
+import { Platform } from 'react-native';
 import { View, ActivityIndicator } from 'react-native';
 import { NavigationContainer } from '@react-navigation/native';
 import { createStackNavigator } from '@react-navigation/stack';
@@ -43,8 +44,8 @@ function MainTabs() {
           backgroundColor: '#0d1326',
           borderTopColor: 'rgba(255,255,255,0.08)',
           borderTopWidth: 1,
-          height: 60,
-          paddingBottom: 8,
+          height: Platform.OS === 'android' ? 65 : 60,
+          paddingBottom: Platform.OS === 'android' ? 12 : 8,
           paddingTop: 6,
         },
         tabBarActiveTintColor: COLORS.accent,
