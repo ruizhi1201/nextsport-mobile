@@ -14,7 +14,7 @@ import type { StackNavigationProp } from '@react-navigation/stack';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import type { CameraType } from 'expo-camera/build/Camera.types';
 import * as ImagePicker from 'expo-image-picker';
-import { Video, ResizeMode } from 'expo-av';
+import { Audio, Video, ResizeMode } from 'expo-av';
 import { submitAnalysis } from '../lib/api';
 import LoadingOverlay from '../components/LoadingOverlay';
 import { COLORS } from '../theme';
@@ -54,23 +54,25 @@ export default function RecordScreen() {
 
   async function startRecording() {
     if (!cameraRef.current) return;
+
+    // Request microphone permission before recording
+    const { status: audioStatus } = await Audio.requestPermissionsAsync();
+    if (audioStatus !== 'granted') {
+      Alert.alert(
+        'Microphone Permission Required',
+        'Please allow microphone access to record swing videos with audio.',
+        [{ text: 'OK' }]
+      );
+      return;
+    }
+
     setIsRecording(true);
     try {
       const video = await cameraRef.current.recordAsync({ maxDuration: 30 });
       setVideoUri(video.uri);
     } catch (err: any) {
-      // Camera recording isn't supported or failed on this device — fallback to upload mode
-      Alert.alert(
-        'Recording Failed',
-        "Camera recording isn't supported on this device. Please upload a video from your gallery.",
-        [
-          {
-            text: 'Upload Video',
-            onPress: () => setMode('upload'),
-          },
-          { text: 'Cancel', style: 'cancel' },
-        ]
-      );
+      Alert.alert('Recording failed', 'Could not record video. Try uploading from your gallery instead.');
+      setMode('upload');
     } finally {
       setIsRecording(false);
     }
