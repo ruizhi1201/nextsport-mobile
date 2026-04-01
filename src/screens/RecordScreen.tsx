@@ -104,8 +104,8 @@ export default function RecordScreen() {
 
     // Check file size before uploading (50MB limit for Vercel)
     try {
-      const fileInfo = await FileSystem.getInfoAsync(videoUri, { size: true });
-      if (fileInfo.exists && fileInfo.size && fileInfo.size > 50 * 1024 * 1024) {
+      const fileInfo = await FileSystem.getInfoAsync(videoUri);
+      if (fileInfo.exists && (fileInfo as any).size && (fileInfo as any).size > 50 * 1024 * 1024) {
         Alert.alert(
           'Video Too Large',
           'Please use a video under 50MB. Try recording a shorter clip (under 30 seconds).',
