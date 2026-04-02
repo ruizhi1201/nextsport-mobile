@@ -77,19 +77,26 @@ export async function submitAnalysis(
   const { uploadUrl, filePath } = uploadUrlResp.data;
 
   // Step 2: Upload directly to Supabase Storage
-  // Read file as blob
-  const response = await fetch(videoUri);
-  const blob = await response.blob();
-
-  // Upload with progress
-  await axios.put(uploadUrl, blob, {
-    headers: { 'Content-Type': videoMimeType },
-    onUploadProgress: (progressEvent) => {
-      if (onProgress && progressEvent.total) {
-        const progress = 0.1 + (progressEvent.loaded / progressEvent.total) * 0.85;
+  // Use XMLHttpRequest for reliable binary upload from local file URIs on Android
+  await new Promise<void>((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('PUT', uploadUrl);
+    xhr.setRequestHeader('Content-Type', videoMimeType);
+    xhr.upload.onprogress = (event) => {
+      if (onProgress && event.total) {
+        const progress = 0.1 + (event.loaded / event.total) * 0.85;
         onProgress(Math.min(progress, 0.95));
       }
-    },
+    };
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        resolve();
+      } else {
+        reject(new Error(`Upload failed with status ${xhr.status}`));
+      }
+    };
+    xhr.onerror = () => reject(new Error('Network request failed during upload'));
+    xhr.send({ uri: videoUri, type: videoMimeType, name: 'swing.mp4' } as any);
   });
 
   onProgress?.(0.97);
