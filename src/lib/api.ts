@@ -31,6 +31,7 @@ export interface Analysis {
   feedback: string | null;
   audio_url: string | null;
   video_url: string | null;
+  result_video_url: string | null;
   status: 'pending' | 'processing' | 'completed' | 'failed';
 }
 
