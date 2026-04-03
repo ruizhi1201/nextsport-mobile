@@ -19,6 +19,7 @@ import type { StackNavigationProp } from '@react-navigation/stack';
 import { useAuth } from '../hooks/useAuth';
 import { useProfile } from '../hooks/useProfile';
 import { getReferral } from '../lib/api';
+import { useLogContext } from '../context/LogContext';
 import { COLORS } from '../theme';
 import type { MainTabParamList, RootStackParamList } from '../navigation/AppNavigator';
 
@@ -36,6 +37,7 @@ export default function ProfileScreen() {
   const navigation = useNavigation<ProfileNavProp>();
   const { user, signOut } = useAuth();
   const { profile, loading, refetch } = useProfile();
+  const { logs, exportLogs, clearLogs } = useLogContext();
   const [referral, setReferral] = useState<ReferralData | null>(null);
   const [refreshing, setRefreshing] = useState(false);
 
@@ -232,6 +234,40 @@ export default function ProfileScreen() {
             label="Privacy Policy"
             onPress={() => WebBrowser.openBrowserAsync('https://nextsport.vercel.app/privacy')}
           />
+        </View>
+
+        {/* Debug / Log Export section */}
+        <View style={styles.debugCard}>
+          <View style={styles.debugHeader}>
+            <Ionicons name="bug-outline" size={18} color={COLORS.muted} />
+            <Text style={styles.debugTitle}>Debug Logs</Text>
+            <Text style={styles.debugCount}>{logs.length} entries</Text>
+          </View>
+          <Text style={styles.debugSubtitle}>
+            Export logs to share with the team when reporting a crash or issue.
+          </Text>
+          <View style={styles.debugButtonRow}>
+            <TouchableOpacity
+              style={styles.exportButton}
+              onPress={exportLogs}
+              activeOpacity={0.85}
+            >
+              <Ionicons name="share-outline" size={18} color="#000" style={{ marginRight: 6 }} />
+              <Text style={styles.exportButtonText}>Export Logs</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.clearButton}
+              onPress={() =>
+                Alert.alert('Clear Logs', 'Delete all stored debug logs?', [
+                  { text: 'Cancel', style: 'cancel' },
+                  { text: 'Clear', style: 'destructive', onPress: clearLogs },
+                ])
+              }
+              activeOpacity={0.8}
+            >
+              <Ionicons name="trash-outline" size={18} color={COLORS.danger} />
+            </TouchableOpacity>
+          </View>
         </View>
 
         {/* Sign out */}
@@ -467,6 +503,65 @@ const styles = StyleSheet.create({
     height: 1,
     backgroundColor: COLORS.border,
     marginHorizontal: 16,
+  },
+  debugCard: {
+    backgroundColor: COLORS.card,
+    borderRadius: 14,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    marginBottom: 16,
+  },
+  debugHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 6,
+  },
+  debugTitle: {
+    color: COLORS.text,
+    fontSize: 15,
+    fontWeight: '700',
+    marginLeft: 8,
+    flex: 1,
+  },
+  debugCount: {
+    color: COLORS.muted,
+    fontSize: 12,
+  },
+  debugSubtitle: {
+    color: COLORS.muted,
+    fontSize: 13,
+    lineHeight: 18,
+    marginBottom: 14,
+  },
+  debugButtonRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  exportButton: {
+    flex: 1,
+    backgroundColor: COLORS.accent,
+    borderRadius: 10,
+    paddingVertical: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 10,
+  },
+  exportButtonText: {
+    color: '#000',
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  clearButton: {
+    width: 44,
+    height: 44,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: 'rgba(239,68,68,0.3)',
+    backgroundColor: 'rgba(239,68,68,0.08)',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   signOutButton: {
     flexDirection: 'row',

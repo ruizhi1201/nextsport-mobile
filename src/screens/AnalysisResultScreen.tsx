@@ -16,6 +16,7 @@ import type { StackNavigationProp } from '@react-navigation/stack';
 import { Audio, Video, ResizeMode } from 'expo-av';
 import * as Sharing from 'expo-sharing';
 import { getAnalysis, pollAnalysis, Analysis } from '../lib/api';
+import { logger } from '../lib/logger';
 import { COLORS } from '../theme';
 import type { RootStackParamList } from '../navigation/AppNavigator';
 
@@ -76,19 +77,33 @@ export default function AnalysisResultScreen() {
   const [isPlaying, setIsPlaying] = useState(false);
   const [audioLoading, setAudioLoading] = useState(false);
 
+  const TAG = 'AnalysisResultScreen';
+
   useEffect(() => {
     async function load() {
       setLoading(true);
       setError(null);
+      logger.info(TAG, `load: starting — analysisId=${analysisId} poll=${poll}`);
       try {
         if (poll) {
+          logger.info(TAG, 'load: entering pollAnalysis loop');
           const result = await pollAnalysis(analysisId);
+          logger.info(TAG, 'load: pollAnalysis complete', {
+            status: result.status,
+            score: result.score,
+            hasAudio: !!result.audio_url,
+            hasFeedback: !!result.feedback,
+            hasResultVideo: !!result.result_video_url,
+          });
           setAnalysis(result);
         } else {
+          logger.info(TAG, 'load: fetching single analysis');
           const result = await getAnalysis(analysisId);
+          logger.info(TAG, 'load: getAnalysis done', { status: result.status, score: result.score });
           setAnalysis(result);
         }
       } catch (err: any) {
+        logger.error(TAG, 'load: FAILED to load analysis', err);
         setError(err.message ?? 'Failed to load analysis.');
       } finally {
         setLoading(false);
@@ -97,25 +112,32 @@ export default function AnalysisResultScreen() {
     load();
     return () => {
       if (sound) {
+        logger.info(TAG, 'cleanup: unloading audio sound');
         sound.unloadAsync();
       }
     };
   }, [analysisId, poll]);
 
   async function toggleAudio() {
-    if (!analysis?.audio_url) return;
+    if (!analysis?.audio_url) {
+      logger.warn(TAG, 'toggleAudio: no audio_url on analysis — cannot play');
+      return;
+    }
 
     if (sound) {
       if (isPlaying) {
+        logger.info(TAG, 'toggleAudio: pausing audio');
         await sound.pauseAsync();
         setIsPlaying(false);
       } else {
+        logger.info(TAG, 'toggleAudio: resuming audio');
         await sound.playAsync();
         setIsPlaying(true);
       }
       return;
     }
 
+    logger.info(TAG, 'toggleAudio: loading audio from URL', { audio_url: analysis.audio_url });
     setAudioLoading(true);
     try {
       await Audio.setAudioModeAsync({ playsInSilentModeIOS: true });
@@ -123,14 +145,17 @@ export default function AnalysisResultScreen() {
         { uri: analysis.audio_url },
         { shouldPlay: true }
       );
+      logger.info(TAG, 'toggleAudio: audio loaded and playing');
       newSound.setOnPlaybackStatusUpdate((status) => {
         if (status.isLoaded && status.didJustFinish) {
+          logger.info(TAG, 'toggleAudio: audio playback finished');
           setIsPlaying(false);
         }
       });
       setSound(newSound);
       setIsPlaying(true);
     } catch (err: any) {
+      logger.error(TAG, 'toggleAudio: failed to load/play audio', err);
       Alert.alert('Audio Error', 'Could not play audio feedback.');
     } finally {
       setAudioLoading(false);

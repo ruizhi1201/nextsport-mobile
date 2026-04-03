@@ -14,9 +14,10 @@ import type { StackNavigationProp } from '@react-navigation/stack';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import type { CameraType } from 'expo-camera/build/Camera.types';
 import * as ImagePicker from 'expo-image-picker';
-import * as FileSystem from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
 import { Audio, Video, ResizeMode } from 'expo-av';
 import { submitAnalysis } from '../lib/api';
+import { logger } from '../lib/logger';
 import LoadingOverlay from '../components/LoadingOverlay';
 import { COLORS } from '../theme';
 import type { RootStackParamList } from '../navigation/AppNavigator';
@@ -42,9 +43,14 @@ export default function RecordScreen() {
   const [uploadPhase, setUploadPhase] = useState<'idle' | 'uploading' | 'processing' | 'done'>('idle');
   const cameraRef = useRef<any>(null);
 
+  const TAG = 'RecordScreen';
+
   const requestCameraPermission = useCallback(async () => {
+    logger.info(TAG, 'requestCameraPermission: requesting camera permission');
     const result = await requestPermission();
+    logger.info(TAG, `requestCameraPermission: granted=${result.granted}`);
     if (!result.granted) {
+      logger.warn(TAG, 'requestCameraPermission: permission DENIED by user');
       Alert.alert(
         'Camera Permission Required',
         'Please allow camera access in Settings to record your swing.',
@@ -54,11 +60,17 @@ export default function RecordScreen() {
   }, [requestPermission]);
 
   async function startRecording() {
-    if (!cameraRef.current) return;
+    if (!cameraRef.current) {
+      logger.warn(TAG, 'startRecording: cameraRef is null — camera not ready');
+      return;
+    }
 
     // Request microphone permission before recording
+    logger.info(TAG, 'startRecording: requesting microphone permission');
     const { status: audioStatus } = await Audio.requestPermissionsAsync();
+    logger.info(TAG, `startRecording: microphone permission status=${audioStatus}`);
     if (audioStatus !== 'granted') {
+      logger.warn(TAG, 'startRecording: microphone permission DENIED');
       Alert.alert(
         'Microphone Permission Required',
         'Please allow microphone access to record swing videos with audio.',
@@ -68,10 +80,13 @@ export default function RecordScreen() {
     }
 
     setIsRecording(true);
+    logger.info(TAG, 'startRecording: calling cameraRef.recordAsync()', { maxDuration: 30 });
     try {
       const video = await cameraRef.current.recordAsync({ maxDuration: 30 });
+      logger.info(TAG, 'startRecording: recording completed', { uri: video.uri });
       setVideoUri(video.uri);
     } catch (err: any) {
+      logger.error(TAG, 'startRecording: recordAsync threw an error', err);
       Alert.alert('Recording failed', 'Could not record video. Try uploading from your gallery instead.');
       setMode('upload');
     } finally {
@@ -80,55 +95,86 @@ export default function RecordScreen() {
   }
 
   function stopRecording() {
+    logger.info(TAG, 'stopRecording: stopping camera recording');
     if (cameraRef.current && isRecording) {
       cameraRef.current.stopRecording();
     }
   }
 
   async function pickVideo() {
+    logger.info(TAG, 'pickVideo: launching image library picker');
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ImagePicker.MediaTypeOptions.Videos,
       allowsEditing: false,
       quality: 1,
     });
 
+    if (result.canceled) {
+      logger.info(TAG, 'pickVideo: user cancelled picker');
+      return;
+    }
+
     if (!result.canceled && result.assets[0]) {
       const asset = result.assets[0];
+      logger.info(TAG, 'pickVideo: video selected', {
+        uri: asset.uri,
+        mimeType: asset.mimeType,
+        fileSize: (asset as any).fileSize,
+        duration: asset.duration,
+        width: asset.width,
+        height: asset.height,
+      });
       setVideoUri(asset.uri);
       setVideoMime(asset.mimeType ?? 'video/mp4');
     }
   }
 
   async function handleAnalyze() {
-    if (!videoUri) return;
+    if (!videoUri) {
+      logger.warn(TAG, 'handleAnalyze: called with no videoUri — ignoring');
+      return;
+    }
+
+    logger.info(TAG, '=== handleAnalyze: START ===', { videoUri, videoMime });
 
     // Check file size before uploading (50MB limit for Vercel)
     try {
       const fileInfo = await FileSystem.getInfoAsync(videoUri);
-      if (fileInfo.exists && (fileInfo as any).size && (fileInfo as any).size > 50 * 1024 * 1024) {
-        Alert.alert(
-          'Video Too Large',
-          'Please use a video under 50MB. Try recording a shorter clip (under 30 seconds).',
-          [{ text: 'OK' }]
-        );
-        return;
+      logger.info(TAG, 'handleAnalyze: file info', fileInfo);
+      if (fileInfo.exists && (fileInfo as any).size) {
+        const sizeMB = ((fileInfo as any).size / (1024 * 1024)).toFixed(2);
+        logger.info(TAG, `handleAnalyze: video size = ${sizeMB} MB`);
+        if ((fileInfo as any).size > 50 * 1024 * 1024) {
+          logger.warn(TAG, `handleAnalyze: video too large (${sizeMB} MB) — aborting`);
+          Alert.alert(
+            'Video Too Large',
+            'Please use a video under 50MB. Try recording a shorter clip (under 30 seconds).',
+            [{ text: 'OK' }]
+          );
+          return;
+        }
       }
-    } catch {
-      // If we can't check size, proceed anyway
+    } catch (sizeErr) {
+      logger.warn(TAG, 'handleAnalyze: could not check file size — proceeding anyway', sizeErr);
     }
 
     setUploading(true);
     setUploadProgress(0);
     setUploadPhase('uploading');
+
     try {
+      logger.info(TAG, 'handleAnalyze: calling submitAnalysis()');
       const result = await submitAnalysis(videoUri, videoMime, (progress) => {
         // Cap at 95% during upload — the last 5% is server-side handoff
         setUploadProgress(Math.min(progress, 0.95));
       });
 
+      logger.info(TAG, 'handleAnalyze: submitAnalysis() returned', result);
+
       // Guard: if result.id is missing the server-side handoff failed
       const analysisId = result?.analysisId ?? result?.id;
       if (!analysisId) {
+        logger.error(TAG, 'handleAnalyze: no analysisId in response — server handoff failed', result);
         setUploadPhase('idle');
         setUploading(false);
         Alert.alert('Analysis Failed', 'Analysis failed — please try again.', [{ text: 'OK' }]);
@@ -136,6 +182,7 @@ export default function RecordScreen() {
       }
 
       // Upload complete — switch to processing phase
+      logger.info(TAG, `handleAnalyze: navigating to AnalysisResult, analysisId=${analysisId}`);
       setUploadProgress(1);
       setUploadPhase('processing');
       navigation.replace('AnalysisResult', { analysisId, poll: true });
@@ -143,13 +190,14 @@ export default function RecordScreen() {
       setUploadPhase('idle');
       setUploading(false);
 
-      // Log full error details for debugging
-      console.log('Upload error details:', JSON.stringify({
+      // Structured error log — replaces the old console.log
+      logger.error(TAG, 'handleAnalyze: submitAnalysis() THREW', {
         code: err?.code,
         message: err?.message,
-        response: err?.response?.data,
-        status: err?.response?.status,
-      }));
+        responseStatus: err?.response?.status,
+        responseData: err?.response?.data,
+        stack: err?.stack,
+      });
 
       // Network timeout (axios timeout = 120s)
       if (err?.code === 'ECONNABORTED' || err?.message?.toLowerCase().includes('timeout')) {
