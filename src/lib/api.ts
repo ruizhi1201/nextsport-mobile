@@ -45,6 +45,9 @@ export interface Analysis {
   video_url: string | null;
   result_video_url: string | null;
   status: 'pending' | 'processing' | 'completed' | 'failed';
+  strengths: string[] | null;
+  improvements: string[] | null;
+  recommended_drills: string[] | null;
 }
 
 export async function getProfile(): Promise<Profile> {

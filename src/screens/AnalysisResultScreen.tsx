@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -13,8 +13,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import type { StackNavigationProp } from '@react-navigation/stack';
-import { Audio, Video, ResizeMode } from 'expo-av';
-import * as Sharing from 'expo-sharing';
+import { Video, ResizeMode } from 'expo-av';
 import { getAnalysis, pollAnalysis, Analysis } from '../lib/api';
 import { logger } from '../lib/logger';
 import { COLORS } from '../theme';
@@ -22,48 +21,6 @@ import type { RootStackParamList } from '../navigation/AppNavigator';
 
 type ResultNavProp = StackNavigationProp<RootStackParamList, 'AnalysisResult'>;
 type ResultRouteProp = RouteProp<RootStackParamList, 'AnalysisResult'>;
-
-function ScoreGauge({ score }: { score: number }) {
-  function getColor() {
-    if (score >= 80) return COLORS.accent;
-    if (score >= 60) return '#f59e0b';
-    return '#ef4444';
-  }
-  function getLabel() {
-    if (score >= 90) return 'Elite';
-    if (score >= 80) return 'Excellent';
-    if (score >= 70) return 'Good';
-    if (score >= 60) return 'Average';
-    if (score >= 50) return 'Below Average';
-    return 'Needs Work';
-  }
-  const color = getColor();
-  return (
-    <View style={gaugeStyles.container}>
-      <View style={[gaugeStyles.circle, { borderColor: color }]}>
-        <Text style={[gaugeStyles.number, { color }]}>{score}</Text>
-        <Text style={[gaugeStyles.outOf, { color }]}>/100</Text>
-      </View>
-      <Text style={[gaugeStyles.label, { color }]}>{getLabel()}</Text>
-    </View>
-  );
-}
-
-const gaugeStyles = StyleSheet.create({
-  container: { alignItems: 'center', marginVertical: 24 },
-  circle: {
-    width: 120,
-    height: 120,
-    borderRadius: 60,
-    borderWidth: 4,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: 'rgba(255,255,255,0.04)',
-  },
-  number: { fontSize: 40, fontWeight: '900' },
-  outOf: { fontSize: 13, fontWeight: '500', marginTop: -4 },
-  label: { fontSize: 16, fontWeight: '700', marginTop: 8 },
-});
 
 export default function AnalysisResultScreen() {
   const navigation = useNavigation<ResultNavProp>();
@@ -73,9 +30,6 @@ export default function AnalysisResultScreen() {
   const [analysis, setAnalysis] = useState<Analysis | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [sound, setSound] = useState<Audio.Sound | null>(null);
-  const [isPlaying, setIsPlaying] = useState(false);
-  const [audioLoading, setAudioLoading] = useState(false);
 
   const TAG = 'AnalysisResultScreen';
 
@@ -90,16 +44,15 @@ export default function AnalysisResultScreen() {
           const result = await pollAnalysis(analysisId);
           logger.info(TAG, 'load: pollAnalysis complete', {
             status: result.status,
-            score: result.score,
-            hasAudio: !!result.audio_url,
+            hasStrengths: !!(result.strengths?.length),
+            hasImprovements: !!(result.improvements?.length),
             hasFeedback: !!result.feedback,
-            hasResultVideo: !!result.result_video_url,
           });
           setAnalysis(result);
         } else {
           logger.info(TAG, 'load: fetching single analysis');
           const result = await getAnalysis(analysisId);
-          logger.info(TAG, 'load: getAnalysis done', { status: result.status, score: result.score });
+          logger.info(TAG, 'load: getAnalysis done', { status: result.status });
           setAnalysis(result);
         }
       } catch (err: any) {
@@ -110,62 +63,11 @@ export default function AnalysisResultScreen() {
       }
     }
     load();
-    return () => {
-      if (sound) {
-        logger.info(TAG, 'cleanup: unloading audio sound');
-        sound.unloadAsync();
-      }
-    };
   }, [analysisId, poll]);
-
-  async function toggleAudio() {
-    if (!analysis?.audio_url) {
-      logger.warn(TAG, 'toggleAudio: no audio_url on analysis — cannot play');
-      return;
-    }
-
-    if (sound) {
-      if (isPlaying) {
-        logger.info(TAG, 'toggleAudio: pausing audio');
-        await sound.pauseAsync();
-        setIsPlaying(false);
-      } else {
-        logger.info(TAG, 'toggleAudio: resuming audio');
-        await sound.playAsync();
-        setIsPlaying(true);
-      }
-      return;
-    }
-
-    logger.info(TAG, 'toggleAudio: loading audio from URL', { audio_url: analysis.audio_url });
-    setAudioLoading(true);
-    try {
-      await Audio.setAudioModeAsync({ playsInSilentModeIOS: true });
-      const { sound: newSound } = await Audio.Sound.createAsync(
-        { uri: analysis.audio_url },
-        { shouldPlay: true }
-      );
-      logger.info(TAG, 'toggleAudio: audio loaded and playing');
-      newSound.setOnPlaybackStatusUpdate((status) => {
-        if (status.isLoaded && status.didJustFinish) {
-          logger.info(TAG, 'toggleAudio: audio playback finished');
-          setIsPlaying(false);
-        }
-      });
-      setSound(newSound);
-      setIsPlaying(true);
-    } catch (err: any) {
-      logger.error(TAG, 'toggleAudio: failed to load/play audio', err);
-      Alert.alert('Audio Error', 'Could not play audio feedback.');
-    } finally {
-      setAudioLoading(false);
-    }
-  }
 
   async function handleShare() {
     if (!analysis) return;
-    const scoreText = analysis.score ? `Score: ${analysis.score}/100` : '';
-    const message = `🏈 My NextSport swing analysis is in!\n${scoreText}\n\nGet your own AI swing analysis at nextsport.vercel.app`;
+    const message = `🏈 My NextSport swing analysis is in!\n\nGet your own AI swing analysis at nextsport.vercel.app`;
     try {
       await Share.share({ message });
     } catch {
@@ -227,8 +129,8 @@ export default function AnalysisResultScreen() {
     );
   }
 
-  // Parse feedback sections
-  const feedbackSections = parseFeedback(analysis.feedback);
+  const strengths = analysis.strengths ?? [];
+  const improvements = analysis.improvements ?? [];
 
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
@@ -247,8 +149,8 @@ export default function AnalysisResultScreen() {
         contentContainerStyle={styles.content}
         showsVerticalScrollIndicator={false}
       >
-        {/* Annotated video */}
-        {analysis.result_video_url && (
+        {/* Annotated video — null-guarded */}
+        {!!analysis.result_video_url && (
           <View style={styles.videoSection}>
             <Text style={styles.videoLabel}>📹 Your Annotated Swing</Text>
             <Text style={styles.videoSubLabel}>Slow motion with coaching cues</Text>
@@ -263,50 +165,48 @@ export default function AnalysisResultScreen() {
           </View>
         )}
 
-        {/* Score */}
-        {analysis.score !== null && <ScoreGauge score={analysis.score} />}
-
-        {/* Audio feedback */}
-        {analysis.audio_url && (
-          <TouchableOpacity
-            style={styles.audioCard}
-            onPress={toggleAudio}
-            activeOpacity={0.85}
-          >
-            {audioLoading ? (
-              <ActivityIndicator size="small" color={COLORS.accent} />
-            ) : (
-              <Ionicons
-                name={isPlaying ? 'pause-circle' : 'play-circle'}
-                size={36}
-                color={COLORS.accent}
-              />
-            )}
-            <View style={styles.audioInfo}>
-              <Text style={styles.audioTitle}>Audio Feedback</Text>
-              <Text style={styles.audioSubtitle}>
-                {isPlaying ? 'Playing…' : 'Tap to listen to your coaching feedback'}
-              </Text>
-            </View>
-            <Ionicons name="volume-high" size={20} color={COLORS.muted} />
-          </TouchableOpacity>
-        )}
-
-        {/* Feedback sections */}
-        {feedbackSections.length > 0 ? (
-          feedbackSections.map((section, i) => (
-            <View key={i} style={styles.feedbackCard}>
-              {section.title ? (
-                <Text style={styles.feedbackTitle}>{section.title}</Text>
-              ) : null}
-              <Text style={styles.feedbackBody}>{section.body}</Text>
-            </View>
-          ))
-        ) : analysis.feedback ? (
+        {/* Raw analysis text */}
+        {!!analysis.feedback && (
           <View style={styles.feedbackCard}>
+            <Text style={styles.cardTitle}>📋 Raw Analysis</Text>
             <Text style={styles.feedbackBody}>{analysis.feedback}</Text>
           </View>
-        ) : null}
+        )}
+
+        {/* Strengths */}
+        {strengths.length > 0 && (
+          <View style={styles.feedbackCard}>
+            <Text style={styles.cardTitle}>Strengths 💪</Text>
+            {strengths.map((item, i) => (
+              <View key={i} style={styles.bulletRow}>
+                <Text style={styles.bullet}>•</Text>
+                <Text style={styles.bulletText}>{item}</Text>
+              </View>
+            ))}
+          </View>
+        )}
+
+        {/* Areas to Improve */}
+        {improvements.length > 0 && (
+          <View style={styles.feedbackCard}>
+            <Text style={styles.cardTitle}>Areas to Improve 🎯</Text>
+            {improvements.map((item, i) => (
+              <View key={i} style={styles.bulletRow}>
+                <Text style={styles.bullet}>•</Text>
+                <Text style={styles.bulletText}>{item}</Text>
+              </View>
+            ))}
+          </View>
+        )}
+
+        {/* Empty state if nothing to show */}
+        {!analysis.feedback && strengths.length === 0 && improvements.length === 0 && (
+          <View style={styles.feedbackCard}>
+            <Text style={styles.feedbackBody}>
+              Analysis complete. Detailed feedback will appear here once available.
+            </Text>
+          </View>
+        )}
 
         {/* Actions */}
         <TouchableOpacity
@@ -325,39 +225,6 @@ export default function AnalysisResultScreen() {
       </ScrollView>
     </SafeAreaView>
   );
-}
-
-function parseFeedback(feedback: string | null): Array<{ title?: string; body: string }> {
-  if (!feedback) return [];
-
-  // Try to detect sections with headers like "**Title:**" or "## Title"
-  const headerRegex = /\*\*(.+?)\*\*[:\n]/g;
-  const matches = [...feedback.matchAll(headerRegex)];
-
-  if (matches.length === 0) {
-    // No structured headers — split by double newlines into paragraphs
-    const paragraphs = feedback.split(/\n\n+/).filter((p) => p.trim().length > 0);
-    return paragraphs.map((p) => ({ body: p.trim() }));
-  }
-
-  const sections: Array<{ title?: string; body: string }> = [];
-  let lastIndex = 0;
-
-  for (let i = 0; i < matches.length; i++) {
-    const match = matches[i];
-    const matchIndex = match.index ?? 0;
-    const title = match[1];
-
-    const bodyStart = matchIndex + match[0].length;
-    const bodyEnd = i + 1 < matches.length ? (matches[i + 1].index ?? feedback.length) : feedback.length;
-    const body = feedback.slice(bodyStart, bodyEnd).trim();
-
-    if (body) {
-      sections.push({ title, body });
-    }
-  }
-
-  return sections;
 }
 
 const styles = StyleSheet.create({
@@ -446,30 +313,6 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: '600',
   },
-  audioCard: {
-    backgroundColor: COLORS.card,
-    borderRadius: 14,
-    padding: 16,
-    flexDirection: 'row',
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: 'rgba(34,197,94,0.3)',
-    marginBottom: 16,
-  },
-  audioInfo: {
-    flex: 1,
-    marginHorizontal: 12,
-  },
-  audioTitle: {
-    color: COLORS.text,
-    fontSize: 15,
-    fontWeight: '600',
-  },
-  audioSubtitle: {
-    color: COLORS.muted,
-    fontSize: 12,
-    marginTop: 2,
-  },
   feedbackCard: {
     backgroundColor: COLORS.card,
     borderRadius: 14,
@@ -478,11 +321,11 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: COLORS.border,
   },
-  feedbackTitle: {
+  cardTitle: {
     color: COLORS.accent,
     fontSize: 14,
     fontWeight: '700',
-    marginBottom: 8,
+    marginBottom: 10,
     textTransform: 'uppercase',
     letterSpacing: 0.5,
   },
@@ -490,6 +333,23 @@ const styles = StyleSheet.create({
     color: COLORS.text,
     fontSize: 15,
     lineHeight: 23,
+  },
+  bulletRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    marginBottom: 6,
+  },
+  bullet: {
+    color: COLORS.accent,
+    fontSize: 16,
+    marginRight: 8,
+    lineHeight: 23,
+  },
+  bulletText: {
+    color: COLORS.text,
+    fontSize: 15,
+    lineHeight: 23,
+    flex: 1,
   },
   analyzeAnotherButton: {
     backgroundColor: COLORS.accent,
